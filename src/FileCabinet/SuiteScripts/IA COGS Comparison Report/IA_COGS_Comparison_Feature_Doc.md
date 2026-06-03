@@ -7,9 +7,33 @@ Report ini membandingkan nilai Inventory Adjustment dengan data COGS Calculation
 - Suitelet untuk parameter, submit proses, status task, dan preview hasil.
 - Map/Reduce untuk memproses data dan membuat output JSON/CSV.
 
-Suitelet juga menyediakan polling page seperti pola Laporan Kartu AP:
+Version 1 tetap disimpan sebagai versi Map/Reduce. Version 2 dibuat sebagai Suitelet-only karena queue Map/Reduce di account DTS cukup tinggi dan kurang cocok untuk report yang butuh hasil langsung.
 
-- `action=statuspage`: halaman tunggu saat Map/Reduce berjalan.
+Version 1:
+
+- File Suitelet: `dts_ia_cogs_comparison_sl.js`
+- File Map/Reduce: `dts_ia_cogs_comparison_mr.js`
+- Suitelet hanya melempar parameter ke Map/Reduce, lalu menampilkan polling page sampai output JSON ditemukan.
+- Form menampilkan loading overlay dan mengunci tombol submit saat submit task untuk mencegah double submit.
+- View report memakai Tabulator dengan header warna per section.
+- Download utama memakai Excel-readable `.xls` server-side dari output JSON Map/Reduce, dengan header warna dan `mso-number-format`.
+- Download `.xlsx` browser-side tetap tersedia sebagai data export.
+
+Version 2:
+
+- File: `dts_ia_cogs_comparison_v2_sl.js`
+- Tidak memakai Map/Reduce.
+- Suitelet langsung menjalankan dua SuiteQL agregasi: IA summary dan COGS summary.
+- Hasil IA dan COGS digabung di memory per item.
+- Form menampilkan loading overlay dan mengunci tombol submit saat proses berjalan untuk mencegah double submit.
+- View report memakai Tabulator dengan header warna per section.
+- Download utama memakai Excel-readable `.xls` server-side dengan header warna dan `mso-number-format`.
+- Download `.xlsx` browser-side tetap tersedia sebagai data export.
+- Governance risk lebih tinggi, terutama untuk periode panjang, semua subsidiary, dan semua item.
+- Cocok untuk periode/filter yang lebih sempit agar user tidak menunggu queue Map/Reduce.
+
+Version 1 Suitelet juga menyediakan polling page seperti pola Laporan Kartu AP:
+
 - `action=checkstatus`: endpoint JSON untuk polling status task.
 - `action=viewreport`: tampilan report dengan third-party JavaScript grid.
 - `action=data`: endpoint JSON untuk data report.
@@ -152,7 +176,7 @@ Header Suitelet preview memakai warna berbeda untuk:
 - Tabulator untuk grid report di `action=viewreport`.
 - SheetJS untuk download `.xlsx` dari halaman viewer.
 
-Selain itu Suitelet menyediakan fallback `action=download` yang membuat Excel-readable `.xls` dari HTML table. Fallback ini mirip pendekatan Kartu AP dan tetap bisa berjalan tanpa service eksternal.
+Selain itu Suitelet menyediakan `action=download` yang membuat Excel-readable `.xls` dari HTML table. File `.xls` ini adalah output styled utama karena mendukung header warna dan `mso-number-format` tanpa service eksternal.
 
 Polling page akan mengecek status Map/Reduce setiap beberapa detik. Setelah status `COMPLETE`, halaman akan menampilkan tombol:
 
@@ -164,9 +188,10 @@ Polling page akan mengecek status Map/Reduce setiap beberapa detik. Setelah stat
 
 Suitelet:
 
-- `custscript_dts_iacogs_mr_script_id`: script id Map/Reduce. Default `customscript_dts_ia_cogs_report_mr`.
-- `custscript_dts_iacogs_mr_deploy_id`: deployment id Map/Reduce. Default `customdeploy_dts_ia_cogs_report_mr`.
-- `custscript_dts_iacogs_output_folder`: internal ID folder File Cabinet untuk output JSON/CSV. Default script memakai folder ID `499` jika parameter kosong.
+- Suitelet tidak memakai script parameter untuk submit MR.
+- Script ID Map/Reduce hardcoded: `customscript_dts_ia_cogs_comparison_mr`.
+- Deployment ID Map/Reduce hardcoded: `customdeploy_dts_ia_cogs_comparison_mr`.
+- Output folder hardcoded: `499`.
 
 Map/Reduce:
 
@@ -181,6 +206,7 @@ Map/Reduce:
 
 - `dts_ia_cogs_comparison_sl.js`: Suitelet report.
 - `dts_ia_cogs_comparison_mr.js`: Map/Reduce processor.
+- `dts_ia_cogs_comparison_v2_sl.js`: Suitelet-only report tanpa Map/Reduce.
 - `IA_COGS_Comparison_Feature_Doc.md`: requirement dan feature note.
 
 ## Validation Notes
@@ -192,3 +218,24 @@ Debug awal yang sudah dikunci:
 - `transaction.subsidiary` tidak tersedia di channel SuiteQL account ini, sehingga filter subsidiary IA memakai `transactionline.subsidiary`.
 - Header COGS memakai `custrecord_dts_inv_date_pos` untuk tanggal dan `custrecord_dts_subsidiary_pos` untuk subsidiary.
 - Field COGS converted existing tidak digunakan sebagai sumber utama, hanya sebagai referensi validasi.
+
+## Setup Troubleshooting
+
+Jika muncul error:
+
+```text
+INVALID_ID: You have provided an invalid script id or internal id
+```
+
+Artinya Suitelet belum menemukan script record/deployment Map/Reduce di account. Buat script record Map/Reduce untuk file:
+
+```text
+/SuiteScripts/IA COGS Comparison Report/dts_ia_cogs_comparison_mr.js
+```
+
+Gunakan default id berikut:
+
+```text
+Script ID: customscript_dts_ia_cogs_comparison_mr
+Deployment ID: customdeploy_dts_ia_cogs_comparison_mr
+```
