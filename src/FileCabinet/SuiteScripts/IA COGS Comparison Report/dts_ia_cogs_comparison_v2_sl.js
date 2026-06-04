@@ -33,7 +33,7 @@ define([
 
     function writeForm(context, params) {
         var form = serverWidget.createForm({
-            title: 'DTS IA vs COGS Comparison Report V2'
+            title: 'DTS IA vs COGS Comparison Report'
         });
 
         var group = form.addFieldGroup({
@@ -61,9 +61,9 @@ define([
             id: 'custpage_subsidiary',
             type: serverWidget.FieldType.MULTISELECT,
             label: 'Subsidiary',
-            source: 'subsidiary',
             container: group.id
         });
+        addSubsidiaryOptions(subsidiary, form);
 
         var item = form.addField({
             id: 'custpage_item',
@@ -97,7 +97,7 @@ define([
 
     function writeReport(context) {
         try {
-            var config = getConfig(context.request.parameters || {});
+            var config = addConfigLabels(getConfig(context.request.parameters || {}));
             var rows = generateRows(config);
             var downloadUrl = buildDownloadUrl(config);
 
@@ -113,12 +113,12 @@ define([
 
     function downloadExcel(context) {
         try {
-            var config = getConfig(context.request.parameters || {});
+            var config = addConfigLabels(getConfig(context.request.parameters || {}));
             var rows = generateRows(config);
             var reportFile = file.create({
                 name: buildFileName(config) + '.xls',
                 fileType: file.Type.HTMLDOC,
-                contents: buildExcelHtml(rows)
+                contents: buildExcelHtml(rows, config)
             });
 
             context.response.writeFile({
@@ -232,11 +232,14 @@ define([
 
     function runPaged(sql, params) {
         var rows = [];
-        var paged = query.runSuiteQLPaged({
+        var options = {
             query: sql,
-            params: params,
             pageSize: 1000
-        });
+        };
+        if (params && params.length) {
+            options.params = params;
+        }
+        var paged = query.runSuiteQLPaged(options);
 
         paged.pageRanges.forEach(function (range) {
             var page = paged.fetch({ index: range.index });
@@ -281,7 +284,7 @@ define([
     }
 
     function finalizeRow(row) {
-        row.costAverageDifference = row.iaCostAverage - row.cogsCostAverage;
+        row.costAverageDifference = row.cogsCostAverage - row.iaCostAverage;
         row.costAveragePercentage = safeDivide(row.costAverageDifference, row.iaCostAverage);
 
         // IA dari NetSuite bernilai negatif, mengikuti screenshot maka compare qty/value memakai IA + COGS.
@@ -313,15 +316,14 @@ define([
     function buildReportHtml(rows, config, downloadUrl) {
         return [
             '<!DOCTYPE html><html><head><meta charset="UTF-8">',
-            '<title>DTS IA vs COGS Comparison V2</title>',
+            '<title>DTS IA vs COGS Comparison</title>',
             '<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/diopputra/NS-Optimizer@master/script/libs/tabulator-master/dist/css/tabulator_bootstrap4.min.css">',
             '<script src="https://cdn.jsdelivr.net/gh/diopputra/NS-Optimizer@master/script/libs/tabulator-master/dist/js/tabulator.min.js"></script>',
-            '<script src="https://cdn.jsdelivr.net/gh/diopputra/NS-Optimizer@master/script/libs/SheetJS/xlsx.full.min.js"></script>',
             '<style>',
             'body{font-family:Arial,sans-serif;margin:0;background:#f6f8fb;color:#26323f}.wrap{padding:18px 22px}',
             '.toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px}.title{font-size:20px;font-weight:bold;margin-right:auto}',
             '.btn{border:1px solid #2f5496;background:#2f5496;color:#fff;border-radius:5px;padding:8px 12px;text-decoration:none;cursor:pointer;font-size:13px}',
-            '.btn.secondary{background:#fff;color:#2f5496}.meta{font-size:12px;color:#667789;margin-bottom:10px}',
+            '.btn.secondary{background:#fff;color:#2f5496}.meta{font-size:12px;color:#667789;margin-bottom:10px;line-height:1.7}',
             '#reportTable{background:#fff;border:1px solid #d9e0e8}.tabulator{font-size:12px}',
             '.tabulator .tabulator-col.base-head,.tabulator .tabulator-col.base-head .tabulator-col-content{background:#e7edf7!important}',
             '.tabulator .tabulator-col.avg-head,.tabulator .tabulator-col.avg-head .tabulator-col-content{background:#e8f3e3!important}',
@@ -329,24 +331,18 @@ define([
             '.tabulator .tabulator-col.value-head,.tabulator .tabulator-col.value-head .tabulator-col-content{background:#f8e2e3!important}',
             '.tabulator .tabulator-col .tabulator-col-title{white-space:normal;text-overflow:clip;color:#1f2933}',
             '</style></head><body><div class="wrap">',
-            '<div class="toolbar"><div class="title">DTS IA vs COGS Comparison V2</div>',
+            '<div class="toolbar"><div class="title">DTS IA vs COGS Comparison</div>',
             '<a class="btn" href="', escapeHtml(downloadUrl), '">Download Excel</a>',
-            '<button id="xlsxBtn" class="btn secondary">Download XLSX Data</button>',
-            '<a class="btn secondary" href="', escapeHtml(getBaseUrl()), '">Buat Report Baru</a></div>',
-            '<div class="meta">Period: ', escapeHtml(config.startDate), ' to ', escapeHtml(config.endDate),
+            '<a class="btn secondary" href="', escapeHtml(getBaseUrl()), '">Generate New Report</a></div>',
+            '<div class="meta">Period: ', escapeHtml(formatDisplayDate(config.startDate)), ' to ', escapeHtml(formatDisplayDate(config.endDate)),
+            ' | Subsidiary: ', escapeHtml(config.subsidiaryLabel),
+            ' | Item: ', escapeHtml(config.itemLabel),
             ' | Rows: ', rows.length, '</div>',
             '<div id="reportTable"></div></div>',
             '<script>',
             'var rows=', JSON.stringify(rows), ';',
             'function n(v){return Number(v||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});}',
             'function p(v){if(v===null||v===undefined||v==="")return "";return n(Number(v)*100)+"%";}',
-            'function excelRows(){return rows.map(function(r){return {"Item":r.item,"Display Name":r.displayName,"Stock Unit":r.stockUnit,',
-            '"IA Cost (Average)":r.iaCostAverage,"COGS Cost (Average)":r.cogsCostAverage,"Difference":r.costAverageDifference,',
-            '"Percentage":r.costAveragePercentage,"IA Qty":r.iaQty,"COGS Qty":r.cogsQty,"Difference Qty":r.qtyDifference,',
-            '"Percentage Qty":r.qtyPercentage,"IA Cost":r.iaCost,"COGS Cost":r.cogsCost,"Difference Value":r.valueDifference};});}',
-            'document.getElementById("xlsxBtn").onclick=function(){var wb=XLSX.utils.book_new();',
-            'var ws=XLSX.utils.json_to_sheet(excelRows());XLSX.utils.book_append_sheet(wb,ws,"IA vs COGS");',
-            'XLSX.writeFile(wb,"dts_ia_cogs_comparison_v2.xlsx");};',
             'new Tabulator("#reportTable",{data:rows,layout:"fitDataStretch",height:"75vh",pagination:true,paginationSize:100,movableColumns:true,columns:[',
             '{title:"Item",field:"item",frozen:true,headerCssClass:"base-head"},{title:"Display Name",field:"displayName",headerCssClass:"base-head"},{title:"Stock Unit",field:"stockUnit",headerCssClass:"base-head"},',
             '{title:"Average Cost",headerCssClass:"avg-head",columns:[',
@@ -367,16 +363,28 @@ define([
         ].join('');
     }
 
-    function buildExcelHtml(rows) {
+    function buildExcelHtml(rows, config) {
         var html = [
             '<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8">',
             '<style>',
             'table{border-collapse:collapse;font-family:Arial,sans-serif;font-size:10pt}',
             'th,td{border:1px solid #9aa7b4;padding:4px 6px;white-space:nowrap}',
             'th{text-align:center;font-weight:bold;color:#1f2933}',
+            '.report-title{background:#2f5496;color:#fff;font-size:16pt;text-align:left;padding:8px}',
+            '.param-label{background:#e7edf7;font-weight:bold}.param-value{text-align:left}',
+            '.spacer td{border:0;height:6px}',
             '.base{background:#e7edf7}.avg{background:#e8f3e3}.qty{background:#e4eefb}.val{background:#f8e2e3}',
             '.num{mso-number-format:"#,##0.00";text-align:right}.pct{mso-number-format:"0.00%";text-align:right}',
-            '</style></head><body><table><tr>',
+            '</style></head><body><table>',
+            '<tr><th class="report-title" colspan="14">DTS IA vs COGS Comparison</th></tr>',
+            '<tr><td class="param-label" colspan="2">Period</td><td class="param-value" colspan="12">',
+            escapeHtml(formatDisplayDate(config.startDate)), ' to ', escapeHtml(formatDisplayDate(config.endDate)), '</td></tr>',
+            '<tr><td class="param-label" colspan="2">Subsidiary</td><td class="param-value" colspan="12">',
+            escapeHtml(config.subsidiaryLabel), '</td></tr>',
+            '<tr><td class="param-label" colspan="2">Item</td><td class="param-value" colspan="12">',
+            escapeHtml(config.itemLabel), '</td></tr>',
+            '<tr class="spacer"><td colspan="14"></td></tr>',
+            '<tr>',
             '<th class="base" rowspan="2">Item</th><th class="base" rowspan="2">Display Name</th><th class="base" rowspan="2">Stock Unit</th>',
             '<th class="avg" colspan="4">Average Cost</th>',
             '<th class="qty" colspan="4">Quantity</th>',
@@ -409,6 +417,33 @@ define([
 
         html.push('</table></body></html>');
         return html.join('');
+    }
+
+    function addSubsidiaryOptions(field, form) {
+        field.addSelectOption({
+            value: '',
+            text: ''
+        });
+
+        try {
+            runPaged([
+                'SELECT id, name',
+                'FROM subsidiary',
+                "WHERE NVL(isinactive, 'F') = 'F'",
+                'ORDER BY name'
+            ].join(' '), []).forEach(function (row) {
+                field.addSelectOption({
+                    value: String(row.id),
+                    text: row.name || String(row.id)
+                });
+            });
+        } catch (e) {
+            log.error({
+                title: 'Load subsidiary options failed',
+                details: e
+            });
+            addMessage(form, 'Subsidiary option gagal dimuat. Kosongkan Subsidiary untuk proses semua subsidiary.');
+        }
     }
 
     function addItemOptions(field, form) {
@@ -525,6 +560,42 @@ define([
         };
     }
 
+    function addConfigLabels(config) {
+        config.subsidiaryLabel = getSelectedLabels(
+            config.subsidiaries,
+            'SELECT id, name AS label FROM subsidiary WHERE ',
+            ' ORDER BY name'
+        );
+        config.itemLabel = getSelectedLabels(
+            config.items,
+            'SELECT id, itemid AS label FROM item WHERE ',
+            ' ORDER BY itemid'
+        );
+        return config;
+    }
+
+    function getSelectedLabels(values, sqlPrefix, sqlSuffix) {
+        if (!values || !values.length) {
+            return 'Semua';
+        }
+
+        var params = [];
+        var condition = buildInCondition('id', values, params);
+
+        try {
+            var labels = runPaged(sqlPrefix + condition + sqlSuffix, params).map(function (row) {
+                return row.label || String(row.id);
+            });
+            return labels.length ? labels.join(', ') : values.join(', ');
+        } catch (e) {
+            log.error({
+                title: 'Load parameter labels failed',
+                details: e
+            });
+            return values.join(', ');
+        }
+    }
+
     function buildDownloadUrl(config) {
         var parts = [
             getBaseUrl(),
@@ -549,7 +620,7 @@ define([
     }
 
     function buildFileName(config) {
-        return 'dts_ia_cogs_comparison_v2_' + config.startDate + '_' + config.endDate;
+        return 'dts_ia_cogs_comparison_' + config.startDate + '_' + config.endDate;
     }
 
     function writeErrorPage(context, title, lines) {
@@ -585,6 +656,14 @@ define([
             pad2(parsed.getMonth() + 1),
             pad2(parsed.getDate())
         ].join('-');
+    }
+
+    function formatDisplayDate(value) {
+        var parts = String(value || '').split('-');
+        if (parts.length !== 3) {
+            return value || '';
+        }
+        return [parts[2], parts[1], parts[0]].join('/');
     }
 
     function multiDefault(value) {

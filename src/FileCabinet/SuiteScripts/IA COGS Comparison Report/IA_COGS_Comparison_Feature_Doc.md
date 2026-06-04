@@ -15,9 +15,11 @@ Version 1:
 - File Map/Reduce: `dts_ia_cogs_comparison_mr.js`
 - Suitelet hanya melempar parameter ke Map/Reduce, lalu menampilkan polling page sampai output JSON ditemukan.
 - Form menampilkan loading overlay dan mengunci tombol submit saat submit task untuk mencegah double submit.
+- Subsidiary multiselect dimuat melalui SuiteQL agar hanya menampilkan nama subsidiary tanpa parent hierarchy.
 - View report memakai Tabulator dengan header warna per section.
+- View report menampilkan Period dalam format `DD/MM/YYYY`, Subsidiary, Item, dan jumlah row. Parameter kosong ditampilkan sebagai `Semua`.
 - Download utama memakai Excel-readable `.xls` server-side dari output JSON Map/Reduce, dengan header warna dan `mso-number-format`.
-- Download `.xlsx` browser-side tetap tersedia sebagai data export.
+- Excel menampilkan nama report dan parameter Period, Subsidiary, serta Item sebelum header kolom.
 
 Version 2:
 
@@ -26,9 +28,11 @@ Version 2:
 - Suitelet langsung menjalankan dua SuiteQL agregasi: IA summary dan COGS summary.
 - Hasil IA dan COGS digabung di memory per item.
 - Form menampilkan loading overlay dan mengunci tombol submit saat proses berjalan untuk mencegah double submit.
+- Subsidiary multiselect dimuat melalui SuiteQL agar hanya menampilkan nama subsidiary tanpa parent hierarchy.
 - View report memakai Tabulator dengan header warna per section.
+- View report menampilkan Period dalam format `DD/MM/YYYY`, Subsidiary, Item, dan jumlah row. Parameter kosong ditampilkan sebagai `Semua`.
 - Download utama memakai Excel-readable `.xls` server-side dengan header warna dan `mso-number-format`.
-- Download `.xlsx` browser-side tetap tersedia sebagai data export.
+- Excel menampilkan nama report dan parameter Period, Subsidiary, serta Item sebelum header kolom.
 - Governance risk lebih tinggi, terutama untuk periode panjang, semua subsidiary, dan semua item.
 - Cocok untuk periode/filter yang lebih sempit agar user tidak menunggu queue Map/Reduce.
 
@@ -134,10 +138,10 @@ COGS Cost = SUM(custrecord_dts_qty_item_cogs_line * custrecord_dts_inv_qty_pos *
 
 ## Difference Logic
 
-Mengikuti screenshot referensi:
+Version 1 dan Version 2 mengikuti koreksi Excel manual:
 
 ```text
-Average Difference = IA Cost Average - COGS Cost Average
+Average Difference = COGS Cost Average - IA Cost Average
 Average Percentage = Average Difference / IA Cost Average
 Qty Difference = IA Qty + COGS Qty
 Qty Percentage = Qty Difference / IA Qty
@@ -174,7 +178,6 @@ Header Suitelet preview memakai warna berbeda untuk:
 `jsreport` murni membutuhkan service Node/server eksternal, sehingga tidak dipakai langsung di Suitelet NetSuite. Implementasi saat ini memakai third-party browser library:
 
 - Tabulator untuk grid report di `action=viewreport`.
-- SheetJS untuk download `.xlsx` dari halaman viewer.
 
 Selain itu Suitelet menyediakan `action=download` yang membuat Excel-readable `.xls` dari HTML table. File `.xls` ini adalah output styled utama karena mendukung header warna dan `mso-number-format` tanpa service eksternal.
 
@@ -182,7 +185,7 @@ Polling page akan mengecek status Map/Reduce setiap beberapa detik. Setelah stat
 
 - View Report
 - Download Excel
-- Create New Report
+- Generate New Report
 
 ## Script Parameters
 

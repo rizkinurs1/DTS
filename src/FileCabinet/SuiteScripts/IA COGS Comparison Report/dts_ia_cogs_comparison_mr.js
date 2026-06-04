@@ -74,7 +74,7 @@ define([
             }
         });
 
-        result.costAverageDifference = result.iaCostAverage - result.cogsCostAverage;
+        result.costAverageDifference = result.cogsCostAverage - result.iaCostAverage;
         result.costAveragePercentage = safeDivide(result.costAverageDifference, result.iaCostAverage);
 
         // IA rows are negative in the reference report, so screenshot parity uses IA + COGS.
