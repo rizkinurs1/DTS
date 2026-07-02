@@ -65,6 +65,14 @@ define([
         });
         addSubsidiaryOptions(subsidiary, form);
 
+        var location = form.addField({
+            id: 'custpage_location',
+            type: serverWidget.FieldType.MULTISELECT,
+            label: 'Location',
+            container: group.id
+        });
+        addLocationOptions(location, form);
+
         var item = form.addField({
             id: 'custpage_item',
             type: serverWidget.FieldType.MULTISELECT,
@@ -72,6 +80,14 @@ define([
             container: group.id
         });
         addItemOptions(item, form);
+
+        var inventarisExpense = form.addField({
+            id: 'custpage_inventaris_expense',
+            type: serverWidget.FieldType.MULTISELECT,
+            label: 'Inventaris Expense',
+            container: group.id
+        });
+        addInventarisExpenseOptions(inventarisExpense);
 
         if (params.custpage_start_date) {
             startDate.defaultValue = params.custpage_start_date;
@@ -82,8 +98,14 @@ define([
         if (params.custpage_subsidiary) {
             subsidiary.defaultValue = multiDefault(params.custpage_subsidiary);
         }
+        if (params.custpage_location) {
+            location.defaultValue = multiDefault(params.custpage_location);
+        }
         if (params.custpage_item) {
             item.defaultValue = multiDefault(params.custpage_item);
+        }
+        if (params.custpage_inventaris_expense) {
+            inventarisExpense.defaultValue = multiDefault(params.custpage_inventaris_expense);
         }
 
         form.addSubmitButton({
@@ -167,7 +189,9 @@ define([
     function runIaSummary(config) {
         var params = [config.startDate, config.endDate];
         var subsidiaryCondition = buildInCondition('tl.subsidiary', config.subsidiaries, params);
+        var locationCondition = buildInCondition('tl.location', config.locations, params);
         var itemCondition = buildInCondition('i.id', config.items, params);
+        var inventarisExpenseCondition = buildInventarisExpenseCondition(config.inventarisExpense);
         var conversionRatio = 'NVL(src_uom.conversionrate, 1) / NULLIF(NVL(target_uom.conversionrate, 1), 0)';
 
         var sql = [
@@ -175,6 +199,7 @@ define([
             'i.id AS item_id,',
             'i.itemid AS item_code,',
             'i.displayname AS display_name,',
+            "MAX(NVL(i.custitem_iteminventarisexpense, 'F')) AS inventaris_expense,",
             'BUILTIN.DF(i.stockunit) AS stock_unit,',
             'AVG(NVL(tl.rate, 0) * ' + conversionRatio + ') AS cost_average,',
             'SUM(NVL(tl.quantity, 0) * ' + conversionRatio + ') AS qty,',
@@ -190,7 +215,9 @@ define([
             "AND i.itemtype IN ('InvtPart', 'Assembly')",
             "AND NVL(tl.mainline, 'F') = 'F'",
             'AND ' + subsidiaryCondition,
+            'AND ' + locationCondition,
             'AND ' + itemCondition,
+            'AND ' + inventarisExpenseCondition,
             'GROUP BY i.id, i.itemid, i.displayname, BUILTIN.DF(i.stockunit)'
         ].join(' ');
 
@@ -200,7 +227,9 @@ define([
     function runCogsSummary(config) {
         var params = [config.startDate, config.endDate];
         var subsidiaryCondition = buildInCondition('h.custrecord_dts_subsidiary_pos', config.subsidiaries, params);
+        var locationCondition = buildInCondition('h.custrecord_dts_inv_location_pos', config.locations, params);
         var itemCondition = buildInCondition('i.id', config.items, params);
+        var inventarisExpenseCondition = buildInventarisExpenseCondition(config.inventarisExpense);
         var conversionRatio = 'NVL(src_uom.conversionrate, 1) / NULLIF(NVL(target_uom.conversionrate, 1), 0)';
         var rawQty = "TO_NUMBER(NVL(l.custrecord_dts_qty_item_cogs_line, '0'))";
         var invoiceQty = "TO_NUMBER(NVL(h.custrecord_dts_inv_qty_pos, '0'))";
@@ -211,6 +240,7 @@ define([
             'i.id AS item_id,',
             'i.itemid AS item_code,',
             'i.displayname AS display_name,',
+            "MAX(NVL(i.custitem_iteminventarisexpense, 'F')) AS inventaris_expense,",
             'BUILTIN.DF(i.stockunit) AS stock_unit,',
             'AVG(' + averageCost + ' * ' + conversionRatio + ') AS cost_average,',
             'SUM(' + rawQty + ' * ' + invoiceQty + ' * ' + conversionRatio + ') AS qty,',
@@ -223,11 +253,31 @@ define([
             "WHERE h.custrecord_dts_inv_date_pos BETWEEN TO_DATE(?, 'YYYY-MM-DD') AND TO_DATE(?, 'YYYY-MM-DD')",
             "AND i.itemtype IN ('InvtPart', 'Assembly')",
             'AND ' + subsidiaryCondition,
+            'AND ' + locationCondition,
             'AND ' + itemCondition,
+            'AND ' + inventarisExpenseCondition,
             'GROUP BY i.id, i.itemid, i.displayname, BUILTIN.DF(i.stockunit)'
         ].join(' ');
 
         return runPaged(sql, params);
+    }
+
+    function buildInventarisExpenseCondition(values) {
+        if (!values || !values.length) {
+            return '1 = 1';
+        }
+        var hasYes = values.indexOf('T') !== -1;
+        var hasNo = values.indexOf('F') !== -1;
+        if (hasYes && hasNo) {
+            return '1 = 1';
+        }
+        if (hasYes) {
+            return "NVL(i.custitem_iteminventarisexpense, 'F') = 'T'";
+        }
+        if (hasNo) {
+            return "NVL(i.custitem_iteminventarisexpense, 'F') = 'F'";
+        }
+        return '1 = 1';
     }
 
     function runPaged(sql, params) {
@@ -268,6 +318,7 @@ define([
             itemId: itemId,
             item: sourceRow.item_code || '',
             displayName: sourceRow.display_name || '',
+            inventarisExpense: sourceRow.inventaris_expense === 'T' ? 'Yes' : 'No',
             stockUnit: sourceRow.stock_unit || '',
             iaCostAverage: 0,
             cogsCostAverage: 0,
@@ -284,13 +335,19 @@ define([
     }
 
     function finalizeRow(row) {
+        row.iaCostAverage = Math.abs(row.iaCostAverage);
+        row.cogsCostAverage = Math.abs(row.cogsCostAverage);
+        row.iaQty = Math.abs(row.iaQty);
+        row.cogsQty = Math.abs(row.cogsQty);
+        row.iaCost = Math.abs(row.iaCost);
+        row.cogsCost = Math.abs(row.cogsCost);
+
         row.costAverageDifference = row.cogsCostAverage - row.iaCostAverage;
         row.costAveragePercentage = safeDivide(row.costAverageDifference, row.iaCostAverage);
 
-        // IA dari NetSuite bernilai negatif, mengikuti screenshot maka compare qty/value memakai IA + COGS.
-        row.qtyDifference = row.iaQty + row.cogsQty;
+        row.qtyDifference = row.cogsQty - row.iaQty;
         row.qtyPercentage = safeDivide(row.qtyDifference, row.iaQty);
-        row.valueDifference = row.iaCost + row.cogsCost;
+        row.valueDifference = row.cogsCost - row.iaCost;
 
         [
             'iaCostAverage',
@@ -336,7 +393,9 @@ define([
             '<a class="btn secondary" href="', escapeHtml(getBaseUrl()), '">Generate New Report</a></div>',
             '<div class="meta">Period: ', escapeHtml(formatDisplayDate(config.startDate)), ' to ', escapeHtml(formatDisplayDate(config.endDate)),
             ' | Subsidiary: ', escapeHtml(config.subsidiaryLabel),
+            ' | Location: ', escapeHtml(config.locationLabel),
             ' | Item: ', escapeHtml(config.itemLabel),
+            ' | Inventaris Expense: ', escapeHtml(config.inventarisExpenseLabel),
             ' | Rows: ', rows.length, '</div>',
             '<div id="reportTable"></div></div>',
             '<script>',
@@ -344,7 +403,7 @@ define([
             'function n(v){return Number(v||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});}',
             'function p(v){if(v===null||v===undefined||v==="")return "";return n(Number(v)*100)+"%";}',
             'new Tabulator("#reportTable",{data:rows,layout:"fitDataStretch",height:"75vh",pagination:true,paginationSize:100,movableColumns:true,columns:[',
-            '{title:"Item",field:"item",frozen:true,headerCssClass:"base-head"},{title:"Display Name",field:"displayName",headerCssClass:"base-head"},{title:"Stock Unit",field:"stockUnit",headerCssClass:"base-head"},',
+            '{title:"Item",field:"item",frozen:true,headerCssClass:"base-head"},{title:"Display Name",field:"displayName",headerCssClass:"base-head"},{title:"Inventaris Expense",field:"inventarisExpense",headerCssClass:"base-head"},{title:"Stock Unit",field:"stockUnit",headerCssClass:"base-head"},',
             '{title:"Average Cost",headerCssClass:"avg-head",columns:[',
             '{title:"IA Cost (Average)",field:"iaCostAverage",hozAlign:"right",headerCssClass:"avg-head",formatter:function(c){return n(c.getValue());}},',
             '{title:"COGS Cost (Average)",field:"cogsCostAverage",hozAlign:"right",headerCssClass:"avg-head",formatter:function(c){return n(c.getValue());}},',
@@ -376,16 +435,20 @@ define([
             '.base{background:#e7edf7}.avg{background:#e8f3e3}.qty{background:#e4eefb}.val{background:#f8e2e3}',
             '.num{mso-number-format:"#,##0.00";text-align:right}.pct{mso-number-format:"0.00%";text-align:right}',
             '</style></head><body><table>',
-            '<tr><th class="report-title" colspan="14">DTS IA vs COGS Comparison</th></tr>',
-            '<tr><td class="param-label" colspan="2">Period</td><td class="param-value" colspan="12">',
+            '<tr><th class="report-title" colspan="15">DTS IA vs COGS Comparison</th></tr>',
+            '<tr><td class="param-label" colspan="2">Period</td><td class="param-value" colspan="13">',
             escapeHtml(formatDisplayDate(config.startDate)), ' to ', escapeHtml(formatDisplayDate(config.endDate)), '</td></tr>',
-            '<tr><td class="param-label" colspan="2">Subsidiary</td><td class="param-value" colspan="12">',
+            '<tr><td class="param-label" colspan="2">Subsidiary</td><td class="param-value" colspan="13">',
             escapeHtml(config.subsidiaryLabel), '</td></tr>',
-            '<tr><td class="param-label" colspan="2">Item</td><td class="param-value" colspan="12">',
+            '<tr><td class="param-label" colspan="2">Location</td><td class="param-value" colspan="13">',
+            escapeHtml(config.locationLabel), '</td></tr>',
+            '<tr><td class="param-label" colspan="2">Item</td><td class="param-value" colspan="13">',
             escapeHtml(config.itemLabel), '</td></tr>',
-            '<tr class="spacer"><td colspan="14"></td></tr>',
+            '<tr><td class="param-label" colspan="2">Inventaris Expense</td><td class="param-value" colspan="13">',
+            escapeHtml(config.inventarisExpenseLabel), '</td></tr>',
+            '<tr class="spacer"><td colspan="15"></td></tr>',
             '<tr>',
-            '<th class="base" rowspan="2">Item</th><th class="base" rowspan="2">Display Name</th><th class="base" rowspan="2">Stock Unit</th>',
+            '<th class="base" rowspan="2">Item</th><th class="base" rowspan="2">Display Name</th><th class="base" rowspan="2">Inventaris Expense</th><th class="base" rowspan="2">Stock Unit</th>',
             '<th class="avg" colspan="4">Average Cost</th>',
             '<th class="qty" colspan="4">Quantity</th>',
             '<th class="val" colspan="3">Value</th>',
@@ -400,6 +463,7 @@ define([
             html.push('<tr>');
             html.push('<td>', escapeHtml(row.item || ''), '</td>');
             html.push('<td>', escapeHtml(row.displayName || ''), '</td>');
+            html.push('<td>', escapeHtml(row.inventarisExpense || ''), '</td>');
             html.push('<td>', escapeHtml(row.stockUnit || ''), '</td>');
             html.push(excelNum(row.iaCostAverage));
             html.push(excelNum(row.cogsCostAverage));
@@ -444,6 +508,39 @@ define([
             });
             addMessage(form, 'Subsidiary option gagal dimuat. Kosongkan Subsidiary untuk proses semua subsidiary.');
         }
+    }
+
+    function addLocationOptions(field, form) {
+        field.addSelectOption({
+            value: '',
+            text: ''
+        });
+
+        try {
+            runPaged([
+                'SELECT id, fullname',
+                'FROM location',
+                "WHERE NVL(isinactive, 'F') = 'F'",
+                'ORDER BY fullname'
+            ].join(' '), []).forEach(function (row) {
+                field.addSelectOption({
+                    value: String(row.id),
+                    text: row.fullname || String(row.id)
+                });
+            });
+        } catch (e) {
+            log.error({
+                title: 'Load location options failed',
+                details: e
+            });
+            addMessage(form, 'Location option gagal dimuat. Kosongkan Location untuk proses semua location.');
+        }
+    }
+
+    function addInventarisExpenseOptions(field) {
+        field.addSelectOption({ value: '', text: '' });
+        field.addSelectOption({ value: 'T', text: 'Yes' });
+        field.addSelectOption({ value: 'F', text: 'No' });
     }
 
     function addItemOptions(field, form) {
@@ -556,7 +653,9 @@ define([
             startDate: toIsoDate(params.custpage_start_date),
             endDate: toIsoDate(params.custpage_end_date),
             subsidiaries: normalizeMulti(params.custpage_subsidiary),
-            items: normalizeMulti(params.custpage_item)
+            locations: normalizeMulti(params.custpage_location),
+            items: normalizeMulti(params.custpage_item),
+            inventarisExpense: normalizeMulti(params.custpage_inventaris_expense)
         };
     }
 
@@ -566,12 +665,36 @@ define([
             'SELECT id, name AS label FROM subsidiary WHERE ',
             ' ORDER BY name'
         );
+        config.locationLabel = getSelectedLabels(
+            config.locations,
+            'SELECT id, fullname AS label FROM location WHERE ',
+            ' ORDER BY fullname'
+        );
         config.itemLabel = getSelectedLabels(
             config.items,
             'SELECT id, itemid AS label FROM item WHERE ',
             ' ORDER BY itemid'
         );
+        config.inventarisExpenseLabel = getInventarisExpenseLabel(config.inventarisExpense);
         return config;
+    }
+
+    function getInventarisExpenseLabel(values) {
+        if (!values || !values.length) {
+            return 'Semua';
+        }
+        var hasYes = values.indexOf('T') !== -1;
+        var hasNo = values.indexOf('F') !== -1;
+        if (hasYes && hasNo) {
+            return 'Semua';
+        }
+        if (hasYes) {
+            return 'Yes';
+        }
+        if (hasNo) {
+            return 'No';
+        }
+        return 'Semua';
     }
 
     function getSelectedLabels(values, sqlPrefix, sqlSuffix) {
@@ -607,8 +730,14 @@ define([
         if (config.subsidiaries.length) {
             parts.push('&custpage_subsidiary=' + encodeURIComponent(config.subsidiaries.join(',')));
         }
+        if (config.locations.length) {
+            parts.push('&custpage_location=' + encodeURIComponent(config.locations.join(',')));
+        }
         if (config.items.length) {
             parts.push('&custpage_item=' + encodeURIComponent(config.items.join(',')));
+        }
+        if (config.inventarisExpense.length) {
+            parts.push('&custpage_inventaris_expense=' + encodeURIComponent(config.inventarisExpense.join(',')));
         }
 
         return parts.join('');

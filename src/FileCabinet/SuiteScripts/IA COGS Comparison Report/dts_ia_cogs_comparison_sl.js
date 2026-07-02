@@ -22,7 +22,9 @@ define([
     var MR_PARAM_START_DATE = 'custscript_dts_iacogs_start_date';
     var MR_PARAM_END_DATE = 'custscript_dts_iacogs_end_date';
     var MR_PARAM_SUBSIDIARIES = 'custscript_dts_iacogs_subsidiaries';
+    var MR_PARAM_LOCATIONS = 'custscript_dts_iacogs_locations';
     var MR_PARAM_ITEMS = 'custscript_dts_iacogs_items';
+    var MR_PARAM_INVENTARIS_EXPENSE = 'custscript_dts_iacogs_inv_expense';
     var MR_PARAM_OUTPUT_FOLDER = 'custscript_dts_iacogs_mr_output_folder';
     var MR_PARAM_RUN_ID = 'custscript_dts_iacogs_run_id';
 
@@ -89,6 +91,14 @@ define([
         });
         addSubsidiaryOptions(subsidiary, form);
 
+        var location = form.addField({
+            id: 'custpage_location',
+            type: serverWidget.FieldType.MULTISELECT,
+            label: 'Location',
+            container: group.id
+        });
+        addLocationOptions(location, form);
+
         var item = form.addField({
             id: 'custpage_item',
             type: serverWidget.FieldType.MULTISELECT,
@@ -96,6 +106,14 @@ define([
             container: group.id
         });
         addItemOptions(item, form);
+
+        var inventarisExpense = form.addField({
+            id: 'custpage_inventaris_expense',
+            type: serverWidget.FieldType.MULTISELECT,
+            label: 'Inventaris Expense',
+            container: group.id
+        });
+        addInventarisExpenseOptions(inventarisExpense);
 
         if (params.custpage_start_date) {
             startDate.defaultValue = params.custpage_start_date;
@@ -106,8 +124,14 @@ define([
         if (params.custpage_subsidiary) {
             subsidiary.defaultValue = multiDefault(params.custpage_subsidiary);
         }
+        if (params.custpage_location) {
+            location.defaultValue = multiDefault(params.custpage_location);
+        }
         if (params.custpage_item) {
             item.defaultValue = multiDefault(params.custpage_item);
+        }
+        if (params.custpage_inventaris_expense) {
+            inventarisExpense.defaultValue = multiDefault(params.custpage_inventaris_expense);
         }
 
         form.addSubmitButton({
@@ -123,14 +147,18 @@ define([
         var startDate = toIsoDate(params.custpage_start_date);
         var endDate = toIsoDate(params.custpage_end_date);
         var subsidiaries = csvParam(params.custpage_subsidiary);
+        var locations = csvParam(params.custpage_location);
         var items = csvParam(params.custpage_item);
+        var inventarisExpense = csvParam(params.custpage_inventaris_expense);
         var runId = buildRunId();
 
         var taskParams = {};
         taskParams[MR_PARAM_START_DATE] = startDate;
         taskParams[MR_PARAM_END_DATE] = endDate;
         taskParams[MR_PARAM_SUBSIDIARIES] = subsidiaries;
+        taskParams[MR_PARAM_LOCATIONS] = locations;
         taskParams[MR_PARAM_ITEMS] = items;
+        taskParams[MR_PARAM_INVENTARIS_EXPENSE] = inventarisExpense;
         taskParams[MR_PARAM_OUTPUT_FOLDER] = OUTPUT_FOLDER_ID;
         taskParams[MR_PARAM_RUN_ID] = runId;
 
@@ -302,9 +330,9 @@ define([
             'function p(v){if(v===null||v===undefined||v==="")return "";return n(Number(v)*100)+"%";}',
             'fetch(base+"&action=data&fileId="+encodeURIComponent(fileId)).then(function(r){return r.json();}).then(function(payload){',
             'rows=payload.rows||[];var labels=payload.parameterLabels||{};',
-            'document.getElementById("meta").textContent="Period: "+(labels.period||"-")+" | Subsidiary: "+(labels.subsidiary||"Semua")+" | Item: "+(labels.item||"Semua")+" | Rows: "+rows.length;',
+            'document.getElementById("meta").textContent="Period: "+(labels.period||"-")+" | Subsidiary: "+(labels.subsidiary||"Semua")+" | Location: "+(labels.location||"Semua")+" | Item: "+(labels.item||"Semua")+" | Inventaris Expense: "+(labels.inventarisExpense||"Semua")+" | Rows: "+rows.length;',
             'new Tabulator("#reportTable",{data:rows,layout:"fitDataStretch",height:"75vh",pagination:true,paginationSize:100,movableColumns:true,columns:[',
-            '{title:"Item",field:"item",frozen:true,headerCssClass:"base-head"},{title:"Display Name",field:"displayName",headerCssClass:"base-head"},{title:"Stock Unit",field:"stockUnit",headerCssClass:"base-head"},',
+            '{title:"Item",field:"item",frozen:true,headerCssClass:"base-head"},{title:"Display Name",field:"displayName",headerCssClass:"base-head"},{title:"Inventaris Expense",field:"inventarisExpense",headerCssClass:"base-head"},{title:"Stock Unit",field:"stockUnit",headerCssClass:"base-head"},',
             '{title:"Average Cost",headerCssClass:"avg-head",columns:[',
             '{title:"IA Cost (Average)",field:"iaCostAverage",hozAlign:"right",headerCssClass:"avg-head",formatter:function(c){return n(c.getValue());}},',
             '{title:"COGS Cost (Average)",field:"cogsCostAverage",hozAlign:"right",headerCssClass:"avg-head",formatter:function(c){return n(c.getValue());}},',
@@ -380,6 +408,39 @@ define([
             });
             addMessage(form, 'Subsidiary option gagal dimuat. Kosongkan Subsidiary untuk proses semua subsidiary.');
         }
+    }
+
+    function addLocationOptions(field, form) {
+        field.addSelectOption({
+            value: '',
+            text: ''
+        });
+
+        try {
+            runPagedRows([
+                'SELECT id, fullname',
+                'FROM location',
+                "WHERE NVL(isinactive, 'F') = 'F'",
+                'ORDER BY fullname'
+            ].join(' '), []).forEach(function (row) {
+                field.addSelectOption({
+                    value: String(row.id),
+                    text: row.fullname || String(row.id)
+                });
+            });
+        } catch (e) {
+            log.error({
+                title: 'Load location options failed',
+                details: e
+            });
+            addMessage(form, 'Location option gagal dimuat. Kosongkan Location untuk proses semua location.');
+        }
+    }
+
+    function addInventarisExpenseOptions(field) {
+        field.addSelectOption({ value: '', text: '' });
+        field.addSelectOption({ value: 'T', text: 'Yes' });
+        field.addSelectOption({ value: 'F', text: 'No' });
     }
 
     function addItemOptions(field, form) {
@@ -472,13 +533,38 @@ define([
                 'SELECT id, name AS label FROM subsidiary WHERE ',
                 ' ORDER BY name'
             ),
+            location: getSelectedLabels(
+                parameters.locations,
+                'SELECT id, fullname AS label FROM location WHERE ',
+                ' ORDER BY fullname'
+            ),
             item: getSelectedLabels(
                 parameters.items,
                 'SELECT id, itemid AS label FROM item WHERE ',
                 ' ORDER BY itemid'
-            )
+            ),
+            inventarisExpense: getInventarisExpenseLabel(parameters.inventarisExpense)
         };
         return payload;
+    }
+
+    function getInventarisExpenseLabel(values) {
+        var list = normalizeMulti(values);
+        if (!list.length) {
+            return 'Semua';
+        }
+        var hasYes = list.indexOf('T') !== -1;
+        var hasNo = list.indexOf('F') !== -1;
+        if (hasYes && hasNo) {
+            return 'Semua';
+        }
+        if (hasYes) {
+            return 'Yes';
+        }
+        if (hasNo) {
+            return 'No';
+        }
+        return 'Semua';
     }
 
     function getSelectedLabels(values, sqlPrefix, sqlSuffix) {
@@ -541,16 +627,20 @@ define([
             '.base{background:#e7edf7}.avg{background:#e8f3e3}.qty{background:#e4eefb}.val{background:#f8e2e3}',
             '.num{mso-number-format:"#,##0.00";text-align:right}.pct{mso-number-format:"0.00%";text-align:right}',
             '</style></head><body><table>',
-            '<tr><th class="report-title" colspan="14">DTS IA vs COGS Comparison</th></tr>',
-            '<tr><td class="param-label" colspan="2">Period</td><td class="param-value" colspan="12">',
+            '<tr><th class="report-title" colspan="15">DTS IA vs COGS Comparison</th></tr>',
+            '<tr><td class="param-label" colspan="2">Period</td><td class="param-value" colspan="13">',
             escapeHtml(labels.period || '-'), '</td></tr>',
-            '<tr><td class="param-label" colspan="2">Subsidiary</td><td class="param-value" colspan="12">',
+            '<tr><td class="param-label" colspan="2">Subsidiary</td><td class="param-value" colspan="13">',
             escapeHtml(labels.subsidiary || 'Semua'), '</td></tr>',
-            '<tr><td class="param-label" colspan="2">Item</td><td class="param-value" colspan="12">',
+            '<tr><td class="param-label" colspan="2">Location</td><td class="param-value" colspan="13">',
+            escapeHtml(labels.location || 'Semua'), '</td></tr>',
+            '<tr><td class="param-label" colspan="2">Item</td><td class="param-value" colspan="13">',
             escapeHtml(labels.item || 'Semua'), '</td></tr>',
-            '<tr class="spacer"><td colspan="14"></td></tr>',
+            '<tr><td class="param-label" colspan="2">Inventaris Expense</td><td class="param-value" colspan="13">',
+            escapeHtml(labels.inventarisExpense || 'Semua'), '</td></tr>',
+            '<tr class="spacer"><td colspan="15"></td></tr>',
             '<tr>',
-            '<th class="base" rowspan="2">Item</th><th class="base" rowspan="2">Display Name</th><th class="base" rowspan="2">Stock Unit</th>',
+            '<th class="base" rowspan="2">Item</th><th class="base" rowspan="2">Display Name</th><th class="base" rowspan="2">Inventaris Expense</th><th class="base" rowspan="2">Stock Unit</th>',
             '<th class="avg" colspan="4">Average Cost</th>',
             '<th class="qty" colspan="4">Quantity</th>',
             '<th class="val" colspan="3">Value</th>',
@@ -565,6 +655,7 @@ define([
             html.push('<tr>');
             html.push('<td>', escapeHtml(row.item || ''), '</td>');
             html.push('<td>', escapeHtml(row.displayName || ''), '</td>');
+            html.push('<td>', escapeHtml(row.inventarisExpense || ''), '</td>');
             html.push('<td>', escapeHtml(row.stockUnit || ''), '</td>');
             html.push(excelNum(row.iaCostAverage));
             html.push(excelNum(row.cogsCostAverage));

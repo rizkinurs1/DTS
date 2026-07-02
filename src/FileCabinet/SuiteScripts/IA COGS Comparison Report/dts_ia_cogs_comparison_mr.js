@@ -13,7 +13,9 @@ define([
     var PARAM_START_DATE = 'custscript_dts_iacogs_start_date';
     var PARAM_END_DATE = 'custscript_dts_iacogs_end_date';
     var PARAM_SUBSIDIARIES = 'custscript_dts_iacogs_subsidiaries';
+    var PARAM_LOCATIONS = 'custscript_dts_iacogs_locations';
     var PARAM_ITEMS = 'custscript_dts_iacogs_items';
+    var PARAM_INVENTARIS_EXPENSE = 'custscript_dts_iacogs_inv_expense';
     var PARAM_OUTPUT_FOLDER = 'custscript_dts_iacogs_mr_output_folder';
     var PARAM_RUN_ID = 'custscript_dts_iacogs_run_id';
     var DEFAULT_OUTPUT_FOLDER = '499';
@@ -43,6 +45,7 @@ define([
             itemId: context.key,
             item: '',
             displayName: '',
+            inventarisExpense: '',
             stockUnit: '',
             iaCostAverage: 0,
             cogsCostAverage: 0,
@@ -61,6 +64,7 @@ define([
             var row = JSON.parse(value);
             result.item = result.item || row.item || '';
             result.displayName = result.displayName || row.displayName || '';
+            result.inventarisExpense = result.inventarisExpense || row.inventarisExpense || '';
             result.stockUnit = result.stockUnit || row.stockUnit || '';
 
             if (row.source === 'IA') {
@@ -74,13 +78,19 @@ define([
             }
         });
 
+        result.iaCostAverage = Math.abs(result.iaCostAverage);
+        result.cogsCostAverage = Math.abs(result.cogsCostAverage);
+        result.iaQty = Math.abs(result.iaQty);
+        result.cogsQty = Math.abs(result.cogsQty);
+        result.iaCost = Math.abs(result.iaCost);
+        result.cogsCost = Math.abs(result.cogsCost);
+
         result.costAverageDifference = result.cogsCostAverage - result.iaCostAverage;
         result.costAveragePercentage = safeDivide(result.costAverageDifference, result.iaCostAverage);
 
-        // IA rows are negative in the reference report, so screenshot parity uses IA + COGS.
-        result.qtyDifference = result.iaQty + result.cogsQty;
+        result.qtyDifference = result.cogsQty - result.iaQty;
         result.qtyPercentage = safeDivide(result.qtyDifference, result.iaQty);
-        result.valueDifference = result.iaCost + result.cogsCost;
+        result.valueDifference = result.cogsCost - result.iaCost;
 
         roundReportRow(result);
 
@@ -110,7 +120,9 @@ define([
         var config = getConfig();
         var sqlParams = [config.startDate, config.endDate];
         var subsidiaryCondition = buildInCondition('tl.subsidiary', config.subsidiaries, sqlParams);
+        var locationCondition = buildInCondition('tl.location', config.locations, sqlParams);
         var itemCondition = buildInCondition('i.id', config.items, sqlParams);
+        var inventarisExpenseCondition = buildInventarisExpenseCondition(config.inventarisExpense);
         var conversionRatio = 'NVL(src_uom.conversionrate, 1) / NULLIF(NVL(target_uom.conversionrate, 1), 0)';
 
         var sql = [
@@ -118,6 +130,7 @@ define([
             'i.id AS item_id,',
             'i.itemid AS item_code,',
             'i.displayname AS display_name,',
+            "MAX(NVL(i.custitem_iteminventarisexpense, 'F')) AS inventaris_expense,",
             'BUILTIN.DF(i.stockunit) AS stock_unit,',
             'AVG(NVL(tl.rate, 0) * ' + conversionRatio + ') AS cost_average,',
             'SUM(NVL(tl.quantity, 0) * ' + conversionRatio + ') AS qty,',
@@ -133,7 +146,9 @@ define([
             "AND i.itemtype IN ('InvtPart', 'Assembly')",
             "AND NVL(tl.mainline, 'F') = 'F'",
             'AND ' + subsidiaryCondition,
+            'AND ' + locationCondition,
             'AND ' + itemCondition,
+            'AND ' + inventarisExpenseCondition,
             'GROUP BY i.id, i.itemid, i.displayname, BUILTIN.DF(i.stockunit)'
         ].join(' ');
 
@@ -144,6 +159,7 @@ define([
                     source: 'IA',
                     item: row.item_code,
                     displayName: row.display_name,
+                    inventarisExpense: row.inventaris_expense === 'T' ? 'Yes' : 'No',
                     stockUnit: row.stock_unit,
                     costAverage: row.cost_average,
                     qty: row.qty,
@@ -157,7 +173,9 @@ define([
         var config = getConfig();
         var sqlParams = [config.startDate, config.endDate];
         var subsidiaryCondition = buildInCondition('h.custrecord_dts_subsidiary_pos', config.subsidiaries, sqlParams);
+        var locationCondition = buildInCondition('h.custrecord_dts_inv_location_pos', config.locations, sqlParams);
         var itemCondition = buildInCondition('i.id', config.items, sqlParams);
+        var inventarisExpenseCondition = buildInventarisExpenseCondition(config.inventarisExpense);
         var conversionRatio = 'NVL(src_uom.conversionrate, 1) / NULLIF(NVL(target_uom.conversionrate, 1), 0)';
         var rawQty = "TO_NUMBER(NVL(l.custrecord_dts_qty_item_cogs_line, '0'))";
         var invoiceQty = "TO_NUMBER(NVL(h.custrecord_dts_inv_qty_pos, '0'))";
@@ -168,6 +186,7 @@ define([
             'i.id AS item_id,',
             'i.itemid AS item_code,',
             'i.displayname AS display_name,',
+            "MAX(NVL(i.custitem_iteminventarisexpense, 'F')) AS inventaris_expense,",
             'BUILTIN.DF(i.stockunit) AS stock_unit,',
             'AVG(' + averageCost + ' * ' + conversionRatio + ') AS cost_average,',
             'SUM(' + rawQty + ' * ' + invoiceQty + ' * ' + conversionRatio + ') AS qty,',
@@ -180,7 +199,9 @@ define([
             "WHERE h.custrecord_dts_inv_date_pos BETWEEN TO_DATE(?, 'YYYY-MM-DD') AND TO_DATE(?, 'YYYY-MM-DD')",
             "AND i.itemtype IN ('InvtPart', 'Assembly')",
             'AND ' + subsidiaryCondition,
+            'AND ' + locationCondition,
             'AND ' + itemCondition,
+            'AND ' + inventarisExpenseCondition,
             'GROUP BY i.id, i.itemid, i.displayname, BUILTIN.DF(i.stockunit)'
         ].join(' ');
 
@@ -191,6 +212,7 @@ define([
                     source: 'COGS',
                     item: row.item_code,
                     displayName: row.display_name,
+                    inventarisExpense: row.inventaris_expense === 'T' ? 'Yes' : 'No',
                     stockUnit: row.stock_unit,
                     costAverage: row.cost_average,
                     qty: row.qty,
@@ -200,6 +222,25 @@ define([
         });
     }
 
+    function buildInventarisExpenseCondition(values) {
+        if (!values || !values.length) {
+            return '1 = 1';
+        }
+        var strValues = values.map(String);
+        var hasYes = strValues.indexOf('T') !== -1;
+        var hasNo = strValues.indexOf('F') !== -1;
+        if (hasYes && hasNo) {
+            return '1 = 1';
+        }
+        if (hasYes) {
+            return "NVL(i.custitem_iteminventarisexpense, 'F') = 'T'";
+        }
+        if (hasNo) {
+            return "NVL(i.custitem_iteminventarisexpense, 'F') = 'F'";
+        }
+        return '1 = 1';
+    }
+
     function getConfig() {
         var script = runtime.getCurrentScript();
 
@@ -207,7 +248,9 @@ define([
             startDate: script.getParameter({ name: PARAM_START_DATE }),
             endDate: script.getParameter({ name: PARAM_END_DATE }),
             subsidiaries: splitIds(script.getParameter({ name: PARAM_SUBSIDIARIES })),
+            locations: splitIds(script.getParameter({ name: PARAM_LOCATIONS })),
             items: splitIds(script.getParameter({ name: PARAM_ITEMS })),
+            inventarisExpense: splitIds(script.getParameter({ name: PARAM_INVENTARIS_EXPENSE })),
             outputFolder: script.getParameter({ name: PARAM_OUTPUT_FOLDER }) || DEFAULT_OUTPUT_FOLDER,
             runId: script.getParameter({ name: PARAM_RUN_ID }) || buildFallbackRunId()
         };
@@ -258,7 +301,9 @@ define([
                 startDate: config.startDate,
                 endDate: config.endDate,
                 subsidiaries: config.subsidiaries,
-                items: config.items
+                locations: config.locations,
+                items: config.items,
+                inventarisExpense: config.inventarisExpense
             },
             rows: rows
         };
@@ -295,6 +340,7 @@ define([
         var headers = [
             'Item',
             'Display Name',
+            'Inventaris Expense',
             'Stock Unit',
             'IA Cost (Average)',
             'COGS Cost (Average)',
@@ -315,6 +361,7 @@ define([
             lines.push([
                 row.item,
                 row.displayName,
+                row.inventarisExpense,
                 row.stockUnit,
                 row.iaCostAverage,
                 row.cogsCostAverage,

@@ -17,9 +17,9 @@ Version 1:
 - Form menampilkan loading overlay dan mengunci tombol submit saat submit task untuk mencegah double submit.
 - Subsidiary multiselect dimuat melalui SuiteQL agar hanya menampilkan nama subsidiary tanpa parent hierarchy.
 - View report memakai Tabulator dengan header warna per section.
-- View report menampilkan Period dalam format `DD/MM/YYYY`, Subsidiary, Item, dan jumlah row. Parameter kosong ditampilkan sebagai `Semua`.
+- View report menampilkan Period dalam format `DD/MM/YYYY`, Subsidiary, Location, Item, dan jumlah row. Parameter kosong ditampilkan sebagai `Semua`.
 - Download utama memakai Excel-readable `.xls` server-side dari output JSON Map/Reduce, dengan header warna dan `mso-number-format`.
-- Excel menampilkan nama report dan parameter Period, Subsidiary, serta Item sebelum header kolom.
+- Excel menampilkan nama report dan parameter Period, Subsidiary, Location, serta Item sebelum header kolom.
 
 Version 2:
 
@@ -30,9 +30,9 @@ Version 2:
 - Form menampilkan loading overlay dan mengunci tombol submit saat proses berjalan untuk mencegah double submit.
 - Subsidiary multiselect dimuat melalui SuiteQL agar hanya menampilkan nama subsidiary tanpa parent hierarchy.
 - View report memakai Tabulator dengan header warna per section.
-- View report menampilkan Period dalam format `DD/MM/YYYY`, Subsidiary, Item, dan jumlah row. Parameter kosong ditampilkan sebagai `Semua`.
+- View report menampilkan Period dalam format `DD/MM/YYYY`, Subsidiary, Location, Item, dan jumlah row. Parameter kosong ditampilkan sebagai `Semua`.
 - Download utama memakai Excel-readable `.xls` server-side dengan header warna dan `mso-number-format`.
-- Excel menampilkan nama report dan parameter Period, Subsidiary, serta Item sebelum header kolom.
+- Excel menampilkan nama report dan parameter Period, Subsidiary, Location, serta Item sebelum header kolom.
 - Governance risk lebih tinggi, terutama untuk periode panjang, semua subsidiary, dan semua item.
 - Cocok untuk periode/filter yang lebih sempit agar user tidak menunggu queue Map/Reduce.
 
@@ -48,7 +48,9 @@ Version 1 Suitelet juga menyediakan polling page seperti pola Laporan Kartu AP:
 - Start Date: date range awal report.
 - End Date: date range akhir report.
 - Subsidiary: multi select subsidiary.
+- Location: multi select location. Jika kosong, semua location di subsidiary terpilih ikut diproses.
 - Item: multi select item, hanya item dengan type Inventory Part dan Assembly. Jika kosong, semua item diproses.
+- Inventaris Expense: filter master item `custitem_iteminventarisexpense` (Yes/No). Jika kosong, semua item diproses.
 
 ## Data Sources
 
@@ -67,6 +69,7 @@ Filter:
 - `BUILTIN.DF(transaction.custbody_dts_adjustment_type) = 'Transfer Order Outlet (By Script)'`
 - `transaction.trandate` berdasarkan Start Date dan End Date
 - `transactionline.subsidiary` berdasarkan parameter Subsidiary
+- `transactionline.location` berdasarkan parameter Location
 - `item.itemtype IN ('InvtPart', 'Assembly')`
 - `transactionline.mainline = 'F'`
 
@@ -97,6 +100,7 @@ Filter:
 
 - `customrecord_dts_inv_cogs_calculation.custrecord_dts_inv_date_pos` berdasarkan Start Date dan End Date
 - `customrecord_dts_inv_cogs_calculation.custrecord_dts_subsidiary_pos` berdasarkan parameter Subsidiary
+- `customrecord_dts_inv_cogs_calculation.custrecord_dts_inv_location_pos` berdasarkan parameter Location
 - `customrecord_dts_cogs_calculation_line.custrecord_dts_item_cogs_line` berdasarkan parameter Item
 - `item.itemtype IN ('InvtPart', 'Assembly')`
 
@@ -136,19 +140,29 @@ COGS Qty = SUM(custrecord_dts_qty_item_cogs_line * custrecord_dts_inv_qty_pos * 
 COGS Cost = SUM(custrecord_dts_qty_item_cogs_line * custrecord_dts_inv_qty_pos * custrecord_dts_acost_item_cogs_line * conversion_ratio)
 ```
 
+## Absolute Values
+
+Semua kolom nilai mentah IA dan COGS (Cost Average, Qty, Value) di-normalize menjadi absolute (`Math.abs`) sebelum masuk ke perhitungan difference. Ini dilakukan agar tampilan report dan Excel konsisten menampilkan angka positif untuk kedua sisi, dan supaya perbandingan menjadi apple-to-apple.
+
+Field yang di-normalize:
+
+- `iaCostAverage`, `cogsCostAverage`
+- `iaQty`, `cogsQty`
+- `iaCost`, `cogsCost`
+
 ## Difference Logic
 
-Version 1 dan Version 2 mengikuti koreksi Excel manual:
+Setelah nilai mentah IA dan COGS dijadikan absolute, difference dihitung sebagai `COGS - IA` sehingga positif berarti COGS lebih besar dari IA.
 
 ```text
 Average Difference = COGS Cost Average - IA Cost Average
 Average Percentage = Average Difference / IA Cost Average
-Qty Difference = IA Qty + COGS Qty
+Qty Difference = COGS Qty - IA Qty
 Qty Percentage = Qty Difference / IA Qty
-Value Difference = IA Cost + COGS Cost
+Value Difference = COGS Cost - IA Cost
 ```
 
-Catatan: Qty dan Value memakai penjumlahan karena IA dari NetSuite bernilai negatif, sedangkan COGS bernilai positif.
+Catatan: sebelumnya formula memakai penjumlahan (`IA + COGS`) karena IA dari NetSuite bernilai negatif. Setelah normalisasi absolute, semua nilai IA dan COGS positif sehingga formula pindah ke pengurangan.
 
 ## Output Columns
 
@@ -201,7 +215,9 @@ Map/Reduce:
 - `custscript_dts_iacogs_start_date`: diisi Suitelet.
 - `custscript_dts_iacogs_end_date`: diisi Suitelet.
 - `custscript_dts_iacogs_subsidiaries`: diisi Suitelet.
+- `custscript_dts_iacogs_locations`: diisi Suitelet. Jika kosong, tidak ada filter location.
 - `custscript_dts_iacogs_items`: diisi Suitelet.
+- `custscript_dts_iacogs_inv_expense`: diisi Suitelet.
 - `custscript_dts_iacogs_mr_output_folder`: diisi Suitelet. Jika kosong, Map/Reduce memakai folder ID `499`.
 - `custscript_dts_iacogs_run_id`: diisi Suitelet.
 
